@@ -1,118 +1,123 @@
-/*
- * Copyright (c) 2017, NXP Semiconductor, Inc.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without modification,
- * are permitted provided that the following conditions are met:
- *
- * o Redistributions of source code must retain the above copyright notice, this list
- *   of conditions and the following disclaimer.
- *
- * o Redistributions in binary form must reproduce the above copyright notice, this
- *   list of conditions and the following disclaimer in the documentation and/or
- *   other materials provided with the distribution.
- *
- * o Neither the name of NXP Semiconductor, Inc. nor the names of its
- *   contributors may be used to endorse or promote products derived from this
- *   software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
- * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
- * ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- */
-
 /**
- * @file    clase4.c
+ * @file    alarm.c
  * @brief   Application entry point.
  */
-
+#include <stdio.h>
 #include "board.h"
 #include "peripherals.h"
 #include "pin_mux.h"
 #include "clock_config.h"
 #include "MK64F12.h"
 #include "fsl_debug_console.h"
-#include "fsl_port.h"
-#include "fsl_gpio.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
-#include "semphr.h"
+#include "event_groups.h"
 
-SemaphoreHandle_t hours_semaphore;
-SemaphoreHandle_t minutes_semaphore;
+#define EVENT_60_SECONDS (1<<0)
+#define EVENT_60_MINUTES (1<<1)
+
+#define EVENT_ALARM_SECONDS (1<<2)
+#define EVENT_ALARM_MINUTES (1<<3)
+#define EVENT_ALARM_HOURS (1<<4)
+
+#define ALARM_VALUE_SECONDS 1
+#define ALARM_VALUE_MINUTES 0
+#define ALARM_VALUE_HOURS 1
+
+#define ALARM_MASK 0x01C
+
+EventGroupHandle_t g_time_events;
 
 void seconds_task(void *arg) {
-
-	int8_t seconds_counter = 0;
 	TickType_t xLastWakeTime;
+
 	const TickType_t xPeriod = pdMS_TO_TICKS(1000);
 	xLastWakeTime = xTaskGetTickCount();
+
+	uint8_t seconds = 55;
+
 	for (;;) {
+
+		if (ALARM_VALUE_SECONDS == seconds) {
+			xEventGroupSetBits(g_time_events, EVENT_ALARM_SECONDS);
+		} else {
+			xEventGroupClearBits(g_time_events, EVENT_ALARM_SECONDS);
+		}
+
 		vTaskDelayUntil(&xLastWakeTime, xPeriod);
-		seconds_counter++;
-		if (60 == seconds_counter) {
-			xSemaphoreGive(minutes_semaphore);
-			seconds_counter = 0;
+		seconds++;
 
+
+		if (60 == seconds)
+
+		{
+			seconds = 0;
+			xEventGroupSetBits(g_time_events, EVENT_60_SECONDS);
 		}
 
 	}
 }
-
 void minutes_task(void *arg) {
-
-	int8_t minutes_counter = 0;
+	uint8_t minutes = 59;
 	for (;;) {
-		xSemaphoreTake(minutes_semaphore, portMAX_DELAY);
-		minutes_counter++;
-		if (60 == minutes_counter) {
-			xSemaphoreGive(hours_semaphore);
-			minutes_counter = 0;
 
+		if (ALARM_VALUE_MINUTES == minutes) {
+			xEventGroupSetBits(g_time_events, EVENT_ALARM_MINUTES);
+		} else {
+			xEventGroupClearBits(g_time_events, EVENT_ALARM_MINUTES);
 		}
 
+		xEventGroupWaitBits(g_time_events, EVENT_60_SECONDS, pdTRUE, pdTRUE,
+		portMAX_DELAY);
+		minutes++;
+
+
+		if (60 == minutes) {
+			minutes = 0;
+			xEventGroupSetBits(g_time_events, EVENT_60_MINUTES);
+
+		}
 	}
 }
-
 void hours_task(void *arg) {
-
-	int8_t hours_counter = 0;
+	uint8_t hours = 0;
 	for (;;) {
-		xSemaphoreTake(hours_semaphore, portMAX_DELAY);
-		hours_counter++;
-		if (24 == hours_counter) {
-			hours_counter = 0;
 
+		if (ALARM_VALUE_HOURS == hours) {
+			xEventGroupSetBits(g_time_events, EVENT_ALARM_HOURS);
+		} else {
+			xEventGroupClearBits(g_time_events, EVENT_ALARM_HOURS);
 		}
 
+		xEventGroupWaitBits(g_time_events, EVENT_60_MINUTES, pdTRUE, pdTRUE,
+		portMAX_DELAY);
+		hours++;
+
+
+		if (24 == hours) {
+			hours = 0;
+		}
 	}
 }
-
-//
-//void alarm_task(void *arg)
-//{
-//	for(;;)
-//	{
-//
-//	}
-//}
 
 void print_task(void *arg) {
+	while (1) {
+		vTaskDelay(1000);
+	}
+}
 
-	for (;;) {
+void alarm_task(void *arg) {
+	EventBits_t alarm;
+	while (1) {
+		alarm = xEventGroupGetBits(  g_time_events );
+		if (ALARM_MASK == (ALARM_MASK & alarm)){
+			PRINTF("ALARM");
+		}
 
 
 	}
 }
-
 int main(void) {
 
 	/* Init board hardware. */
@@ -122,24 +127,22 @@ int main(void) {
 	/* Init FSL debug console. */
 	BOARD_InitDebugConsole();
 
-	CLOCK_EnableClock(kCLOCK_PortB);
-	CLOCK_EnableClock(kCLOCK_PortA);
+	g_time_events = xEventGroupCreate();
 
-	minutes_semaphore = xSemaphoreCreateBinary();
-	hours_semaphore = xSemaphoreCreateBinary();
-
-	xTaskCreate(seconds_task, "seconds task", configMINIMAL_STACK_SIZE, NULL,
-			configMAX_PRIORITIES - 2, NULL);
-	xTaskCreate(minutes_task, "minutes task", configMINIMAL_STACK_SIZE, NULL,
-			configMAX_PRIORITIES - 3, NULL);
-	xTaskCreate(hours_task, "hours task", configMINIMAL_STACK_SIZE, NULL, configMAX_PRIORITIES - 4, NULL);
-//xTaskCreate(led_task, "alarm task", configMINIMAL_STACK_SIZE, NULL, configMAX_PRIORITIES-1, NULL);
-	//xTaskCreate(print_task, "print task", configMINIMAL_STACK_SIZE, NULL,configMAX_PRIORITIES - 5, NULL);
-//xTaskCreate(dummy, "dummy task", configMINIMAL_STACK_SIZE, NULL, configMAX_PRIORITIES-2, NULL);
-
+	xTaskCreate(seconds_task, "Seconds", 300, NULL, configMAX_PRIORITIES - 1,
+	NULL);
+	xTaskCreate(minutes_task, "Minutes", 300, NULL, configMAX_PRIORITIES - 1,
+	NULL);
+	xTaskCreate(hours_task, "Hours", 300, NULL, configMAX_PRIORITIES - 1, NULL);
+	xTaskCreate(print_task, "Printer", 300, NULL, configMAX_PRIORITIES - 1,
+	NULL);
+	xTaskCreate(alarm_task, "Alarm", 300, NULL, configMAX_PRIORITIES - 3,
+	NULL);
 	vTaskStartScheduler();
-	while (1) {
+
+	for (;;) {
 
 	}
+
 	return 0;
 }
