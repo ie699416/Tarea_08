@@ -203,9 +203,9 @@ int main(void) {
 	NULL);
 	xTaskCreate(hours_task, "Hours", 300, NULL, configMAX_PRIORITIES  ,
 	NULL);
-	xTaskCreate(print_task, "Printer", 300, NULL, configMAX_PRIORITIES - 4,
+	xTaskCreate(print_task, "Printer", 300, NULL, configMAX_PRIORITIES - 3,
 	NULL);
-	xTaskCreate(alarm_task, "Alarm", 300, NULL, configMAX_PRIORITIES - 3,
+	xTaskCreate(alarm_task, "Alarm", 300, NULL, configMAX_PRIORITIES - 4,
 	NULL);
 	vTaskStartScheduler();
 
